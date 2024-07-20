@@ -25,16 +25,20 @@ def download_images(urls, folder):
         url = url.strip()  # Remove any extra whitespace/newlines
         if url:
             url = remove_query_params(url)
-            try:
-                response = requests.get(url, headers=headers, stream=True)
-                if response.status_code == 200:
-                    with open(f"{folder}/image_{index}.jpeg", "wb") as handler:
-                        handler.write(response.content)
-                    print(f"Downloaded image_{index}.jpg from {url}")
-                else:
-                    print(f"Failed to download image_{index}.jpg from {url}: Status code {response.status_code}")
-            except Exception as e:
-                print(f"Could not download image_{index}.jpg from {url}: {e}")
+            image_path = f"{folder}/image_{index}.jpeg"
+            if not os.path.exists(image_path):  # Check if image already exists
+                try:
+                    response = requests.get(url, headers=headers, stream=True)
+                    if response.status_code == 200:
+                        with open(image_path, "wb") as handler:
+                            handler.write(response.content)
+                        print(f"Downloaded image_{index}.jpeg from {url}")
+                    else:
+                        print(f"Failed to download image_{index}.jpeg from {url}: Status code {response.status_code}")
+                except Exception as e:
+                    print(f"Could not download image_{index}.jpeg from {url}: {e}")
+            else:
+                print(f"Image {image_path} already exists, skipping download.")
 
 
 # Directory containing URL files
