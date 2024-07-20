@@ -1,5 +1,6 @@
 import os
 import requests
+from urllib.parse import urlparse, urlunparse
 
 # Headers for downloading images
 headers = {
@@ -9,6 +10,13 @@ headers = {
 }
 
 
+# Function to remove query parameters from a URL
+def remove_query_params(url):
+    parsed_url = urlparse(url)
+    url_without_query = urlunparse(parsed_url._replace(query=""))
+    return url_without_query
+
+
 # Function to download images from a list of URLs
 def download_images(urls, folder):
     if not os.path.exists(folder):
@@ -16,10 +24,11 @@ def download_images(urls, folder):
     for index, url in enumerate(urls):
         url = url.strip()  # Remove any extra whitespace/newlines
         if url:
+            url = remove_query_params(url)
             try:
                 response = requests.get(url, headers=headers, stream=True)
                 if response.status_code == 200:
-                    with open(f"{folder}/image_{index}.jpg", "wb") as handler:
+                    with open(f"{folder}/image_{index}.jpeg", "wb") as handler:
                         handler.write(response.content)
                     print(f"Downloaded image_{index}.jpg from {url}")
                 else:
