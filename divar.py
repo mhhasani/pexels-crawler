@@ -4,6 +4,7 @@ import uuid
 from urllib.parse import urlparse
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 # Constants
 URL = "https://api.divar.ir/v8/postlist/w/search"
@@ -63,7 +64,8 @@ def extract_links_from_csv(csv_file_path, max_rows=MAX_ROWS):
                     "search_data": {
                         "form_data": {
                             "data": {"category": {"str": {"value": category}}},
-                        }
+                        },
+                        # "query": "",
                     },
                 }
 
@@ -82,13 +84,13 @@ def extract_links_from_csv(csv_file_path, max_rows=MAX_ROWS):
                     link = extract_inset_banner_link(response_json)
                     if link:
                         extracted_links.append(link)
-                        # print(link)
+                        print(link)
                 else:
-                    print("fail")
+                    print("fail", response.status_code)
 
     print("Total count:", total_count)
     print(f"Total requests sent: {request_count}")  # Print the total number of requests sent
-    return extracted_links
+    return extracted_links, total_count  # Return total_count
 
 
 def extract_inset_banner_link(response_json):
@@ -141,35 +143,48 @@ def categorize_urls_and_aggregate(urls):
         "WITH UTM": defaultdict(int),
     }
 
+    total_ads_per_publisher = defaultdict(int)  # Track total ads per publisher
+
     for url in urls:
         domain = urlparse(url).netloc
         if "adivery" in url or "yektanet" in url:
             counts["YEKTANET"][domain] += 1
+            total_ads_per_publisher["YEKTANET"] += 1
         elif "tapsell" in url:
             counts["tapsell"][domain] += 1
+            total_ads_per_publisher["tapsell"] += 1
         elif "daart" in url:
             counts["DAART"][domain] += 1
+            total_ads_per_publisher["DAART"] += 1
         elif "utm" not in url:
             counts["WITHOUT UTM"][domain] += 1
+            total_ads_per_publisher["WITHOUT UTM"] += 1
         else:
             counts["WITH UTM"][domain] += 1
+            total_ads_per_publisher["WITH UTM"] += 1
 
-    return counts
+    return counts, total_ads_per_publisher
 
 
-def print_category_counts(category_counts):
-    """Print the counts for each category and domain."""
+def print_category_counts(category_counts, total_ads_per_publisher, total_ads):
+    """Print the counts for each category, domain, and total ads."""
     for category, domains in category_counts.items():
         print(f"\nCategory: {category}")
         for domain, count in domains.items():
             print(f"{domain}: {count}")
 
+    print("\nTotal ads per publisher:")
+    for publisher, count in total_ads_per_publisher.items():
+        print(f"{publisher}: {count}")
+
+    print(f"\nTotal ads showed: {total_ads}")
+
 
 def main():
-    links = extract_links_from_csv(CSV_FILE_PATH)
+    links, total_ads = extract_links_from_csv(CSV_FILE_PATH)  # Get total_ads from CSV
     redirected_urls = get_redirected_urls(links)
-    category_counts = categorize_urls_and_aggregate(redirected_urls)
-    print_category_counts(category_counts)
+    category_counts, total_ads_per_publisher = categorize_urls_and_aggregate(redirected_urls)
+    print_category_counts(category_counts, total_ads_per_publisher, total_ads)
 
 
 if __name__ == "__main__":
