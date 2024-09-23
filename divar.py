@@ -1,10 +1,11 @@
 import csv
 import requests
 import uuid
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
+import base64
+import json
 
 # Constants
 URL = "https://api.divar.ir/v8/postlist/w/search"
@@ -27,8 +28,8 @@ HEADERS_TEMPLATE = {
 }
 
 CSV_FILE_PATH = "data.csv"  # Path to your CSV file
-MAX_ROWS = 20000  # Limit the number of rows to process
-MAX_WORKERS = 15  # Number of threads for parallel execution
+MAX_ROWS = 15000  # Limit the number of rows to process
+MAX_WORKERS = 35  # Number of threads for parallel execution
 
 
 def get_headers_with_random_cookie():
@@ -101,36 +102,67 @@ def extract_inset_banner_link(response_json):
     return None
 
 
+def decode_jwt_token(jwt_token):
+    """Decode a JWT token without verification."""
+    try:
+        # JWT token consists of three parts: header, payload, and signature
+        header, payload, signature = jwt_token.split(".")
+
+        # Decode the payload (Base64 URL-safe decoding)
+        decoded_payload = base64.urlsafe_b64decode(payload + "==")  # Add padding '==' if needed
+        return json.loads(decoded_payload)
+    except Exception as e:
+        print(f"Error decoding JWT token: {e}")
+        return None
+
+
+def extract_redirected_url_from_token(token_payload):
+    """Extract the external URL from the decoded JWT token payload."""
+    external_url_info = token_payload.get("externalUrl", {})
+
+    # Build the redirected URL from its components
+    scheme = external_url_info.get("Scheme", "http")
+    host = external_url_info.get("Host", "")
+    path = external_url_info.get("Path", "")
+    raw_query = external_url_info.get("RawQuery", "")
+
+    redirected_url = f"{scheme}://{host}{path}"
+
+    if raw_query:
+        redirected_url += f"?{raw_query}"
+
+    return redirected_url
+
+
 def get_redirected_urls(links):
-    """Follow the links and get the redirected URLs."""
+    """Extract and decode JWT tokens from Divar links to find redirected URLs."""
     redirected_urls = []
-    tasks = []
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        for link in links:
-            tasks.append(executor.submit(fetch_redirected_url, link))
+    for link in links:
+        # Parse the URL and extract the ext_link_data parameter (JWT token)
+        parsed_url = urlparse(link)
+        query_params = parse_qs(parsed_url.query)
 
-        for future in as_completed(tasks):
-            result = future.result()
-            if result:
-                redirected_urls.append(result)
+        if "ext_link_data" in query_params:
+            jwt_token = query_params["ext_link_data"][0]
+
+            # Decode the JWT token to get the payload
+            token_payload = decode_jwt_token(jwt_token)
+
+            if token_payload:
+                # Extract the redirected URL from the token's payload
+                redirected_url = extract_redirected_url_from_token(token_payload)
+                if redirected_url:
+                    redirected_urls.append(redirected_url)
+                    print(f"Decoded redirected URL: {redirected_url}")
+                else:
+                    print("No redirected URL found in token payload")
+            else:
+                print(f"Failed to decode JWT token for link: {link}")
+        else:
+            print(f"No ext_link_data found in URL: {link}")
 
     return redirected_urls
-
-
-def fetch_redirected_url(link):
-    """Fetch the redirected URL for a given link."""
-    try:
-        response = requests.get(link, allow_redirects=False)
-        if "Location" in response.headers:
-            redirected_url = response.headers["Location"]
-            print(f"Redirected URL: {redirected_url}")
-            return redirected_url
-        else:
-            print(f"No redirection for URL: {link}")
-    except requests.RequestException as e:
-        print(f"Error fetching URL: {e}")
-    return None
 
 
 def categorize_urls_and_aggregate(urls):
@@ -147,6 +179,7 @@ def categorize_urls_and_aggregate(urls):
 
     for url in urls:
         domain = urlparse(url).netloc
+        url = url.lower()
         if "adivery" in url or "yektanet" in url:
             counts["YEKTANET"][domain] += 1
             total_ads_per_publisher["YEKTANET"] += 1
