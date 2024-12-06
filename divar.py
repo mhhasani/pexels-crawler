@@ -11,10 +11,9 @@ import json
 URL = "https://api.divar.ir/v8/postlist/w/search"
 HEADERS_TEMPLATE = {
     "accept": "application/json, text/plain, */*",
-    "accept-language": "en-US,en;q=0.9",
+    "accept-language": "fa,en;q=0.9",
     "content-type": "application/json",
     "origin": "https://divar.ir",
-    "priority": "u=1, i",
     "referer": "https://divar.ir/",
     "sec-ch-ua": '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
     "sec-ch-ua-mobile": "?0",
@@ -23,13 +22,14 @@ HEADERS_TEMPLATE = {
     "sec-fetch-mode": "cors",
     "sec-fetch-site": "same-site",
     "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "x-requested-with": "XMLHttpRequest",
     "x-render-type": "CSR",
     "x-standard-divar-error": "true",
 }
 
-CSV_FILE_PATH = "data.csv"  # Path to your CSV file
-MAX_ROWS = 100  # Limit the number of rows to process
-MAX_WORKERS = 35  # Number of threads for parallel execution
+CSV_FILE_PATH = "all_coded_data.csv"  # Path to your CSV file
+MAX_ROWS = 500  # Limit the number of rows to process
+MAX_WORKERS = 35 # Number of threads for parallel execution
 
 
 def get_headers_with_random_cookie():
@@ -100,7 +100,7 @@ def extract_links_from_csv(csv_file_path, max_rows=MAX_ROWS):
 
 def extract_inset_banner_link(response_json):
     """Extract the 'INSET_BANNER' link from the response JSON."""
-    for widget in response_json.get("list_top_widgets", []):
+    for widget in response_json.get("list_widgets", []):
         if widget.get("widget_type") == "INSET_BANNER":
             return widget.get("data", {}).get("action", {}).get("payload", {}).get("link")
     return None
@@ -174,7 +174,8 @@ def categorize_urls_and_aggregate(urls):
     """Categorize URLs and aggregate them by domain."""
     counts = {
         "YEKTANET": defaultdict(lambda: {"ad_count": 0, "impression_count": 0, "placements": []}),
-        "tapsell": defaultdict(lambda: {"ad_count": 0, "impression_count": 0, "placements": []}),
+        "SEENSHIN": defaultdict(lambda: {"ad_count": 0, "impression_count": 0, "placements": []}),
+        "TAPSELL": defaultdict(lambda: {"ad_count": 0, "impression_count": 0, "placements": []}),
         "DAART": defaultdict(lambda: {"ad_count": 0, "impression_count": 0, "placements": []}),
         "WITH UTM": defaultdict(lambda: {"ad_count": 0, "impression_count": 0, "placements": []}),
         "WITHOUT UTM": defaultdict(lambda: {"ad_count": 0, "impression_count": 0, "placements": []}),
@@ -203,18 +204,30 @@ def categorize_urls_and_aggregate(urls):
             )
             totals_per_publisher["YEKTANET"]["ad_count"] += 1
             totals_per_publisher["YEKTANET"]["impression_count"] += row_count
-        elif "tapsell" in url:
-            counts["tapsell"][domain]["ad_count"] += 1
-            counts["tapsell"][domain]["impression_count"] += row_count
-            counts["tapsell"][domain]["placements"].append(
+        elif "seenshin" in url:
+            counts["SEENSHIN"][domain]["ad_count"] += 1
+            counts["SEENSHIN"][domain]["impression_count"] += row_count
+            counts["SEENSHIN"][domain]["placements"].append(
                 {
                     "cities": cities,
                     "neighborhoods": neighborhoods,
                     "category": category,
                 }
             )
-            totals_per_publisher["tapsell"]["ad_count"] += 1
-            totals_per_publisher["tapsell"]["impression_count"] += row_count
+            totals_per_publisher["SEENSHIN"]["ad_count"] += 1
+            totals_per_publisher["SEENSHIN"]["impression_count"] += row_count
+        elif "tapsell" in url:
+            counts["TAPSELL"][domain]["ad_count"] += 1
+            counts["TAPSELL"][domain]["impression_count"] += row_count
+            counts["TAPSELL"][domain]["placements"].append(
+                {
+                    "cities": cities,
+                    "neighborhoods": neighborhoods,
+                    "category": category,
+                }
+            )
+            totals_per_publisher["TAPSELL"]["ad_count"] += 1
+            totals_per_publisher["TAPSELL"]["impression_count"] += row_count
         elif "daart" in url:
             counts["DAART"][domain]["ad_count"] += 1
             counts["DAART"][domain]["impression_count"] += row_count
@@ -277,8 +290,42 @@ def print_category_counts(category_counts, totals_per_publisher):
         print(f"{publisher}: {data['impression_count'] / sum_impressions * 100:.2f}%")
 
 
+def get_divar_cities_dict():
+    """Get the list of cities and their codes from the Divar API."""
+    # API endpoint URL
+    api_url = "https://api.divar.ir/v8/filters/multi-city/1/"
+
+    # Make the HTTP request to the API
+    response = requests.get(api_url)
+
+    # Parse JSON response
+    response_data = response.json()
+
+    # Extract city data
+    data = response_data["ui_schema"]["cities"]["ui:options"]["data"]["children"]
+
+    city_dict = {}
+
+    for province in data:
+        province_code = province["enum"]
+        province_name = province["enumName"]
+        for city in province["children"]:
+            city_code = city["enum"]
+            city_name = city["enumName"]
+            parent_name = province_name
+            city_dict[city_code] = {"name": city_name, "code": city_code, "parent": parent_name}
+
+    DivarCities = {}
+    data = response_data["json_schema"]["properties"]["cities"]["items"]
+    for i in range(len(data["enum"])):
+        DivarCities[data["enum"][i]] = data["enumNames"][i]
+
+    return DivarCities
+
+
 def save_category_counts_to_csv(category_counts, total_ads_per_publisher, csv_file_path):
     """Save the counts for each category, domain, and total ads to a CSV file, with each placement on a separate row and without repeating the other columns' data."""
+    divar_cities = get_divar_cities_dict()
     with open(csv_file_path, mode="w", newline="") as file:
         writer = csv.writer(file)
 
@@ -294,7 +341,7 @@ def save_category_counts_to_csv(category_counts, total_ads_per_publisher, csv_fi
 
                 # Write the first row with full data, then leave columns empty for subsequent placements
                 for idx, placement in enumerate(placements):
-                    cities = "-".join(placement["cities"])  # Convert list of cities to a single string
+                    cities = "-".join([divar_cities.get(city, city) for city in placement["cities"]])
                     neighborhoods = "-".join(placement["neighborhoods"])  # Convert list of neighborhoods to a single string
                     category_placement = placement["category"]
 
@@ -327,7 +374,7 @@ def main():
     redirected_urls = get_redirected_urls(links)
     category_counts, total_ads_per_publisher = categorize_urls_and_aggregate(redirected_urls)
     print_category_counts(category_counts, total_ads_per_publisher)
-    save_category_counts_to_csv(category_counts, total_ads_per_publisher, "output_results.csv")
+    save_category_counts_to_csv(category_counts, total_ads_per_publisher, "divar_crawl_data.csv")
 
 
 if __name__ == "__main__":
